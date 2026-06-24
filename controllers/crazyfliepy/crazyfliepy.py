@@ -12,7 +12,7 @@ from pid_controller import (
     pid_velocity_fixed_height_controller,
 )
 
-FLYING_ALTITUDE = 1.0 #Estable la altura fija del drone - 1m
+FLYING_ALTITUDE = 0.6 #Estable la altura fija del drone - 1m
 
 def main():
 
@@ -75,8 +75,8 @@ def main():
     # Iniciacion de las variables 
     actual_state = ActualState()
     desired_state = DesiredState()
-    past_x_global = 0.0
-    past_y_global = 0.0
+    past_x_global = gps.getValues()[0] #Obtiene la posicion global en x del drone - De esta manera el dron se puede posicionar en cualquier parte del mapa sin afectar su funcionamiento basico.
+    past_y_global = gps.getValues()[1] #Obtiene la posicion global en y del drone - De esta manera el dron se puede posicionar en cualquier parte del mapa sin afectar su funcionamiento basico.
     past_time = robot.getTime()
 
     # Iniciacion de los valores (gains) para el controlador PID
@@ -112,6 +112,13 @@ def main():
     tvec = [0, 5, 10, 15]
 
     stable = False
+
+    #Variables para el sistema de navegacion por waypoints
+    current_wp_index = 0
+    waypoints = [] #list para guardar los waypoints
+    th0 = 0.0 #Valor inicial del angulo de yaw 
+    smoothed_vx = 0.0 #Velocidad en X del dron (promedio de las ultimas velocidades)
+    smoothed_vy = 0.0 #Velocidad en Y del dron (promedio de las ultimas velocidades)
 
     tini = robot.getTime()
 
@@ -201,6 +208,7 @@ def main():
         Kh = 5.0
         th = rpy[2]
 
+        '''
         if robot.getTime() > 5:
             if stable == False:
                 #inicializa interp
@@ -220,7 +228,7 @@ def main():
                 vy = -Kp*(y_global-yd)
                 forward_desired = math.cos(th)*vx+math.sin(th)*vy
                 sideways_desired = -math.sin(th)*vx+math.cos(th)*vy
-                height_desired = 1.0
+                height_desired = 0.6 #Altura deseada del dron para el sistema automatico de rutas
                 thd = spi.splev(tcurr, thc)
                 dang = math.fmod(th-thd, 2.0*math.pi)
                 yaw_desired = -Kh*dang
@@ -228,6 +236,69 @@ def main():
                     forward_desired = 0
                     sideways_desired = 0
                     yaw_desired = 0
+        else:
+            height_desired += height_diff_desired * dt
+        '''
+
+        # Sistema de navegacion basado en waypoint - se configuro una ruta por defecto
+        if robot.getTime() > 5:
+            if stable == False:
+                x0 = x_global
+                y0 = y_global
+                th0 = th
+                # El dron avanza hacia +Y. Evadir derecha = +X, Evadir izquierda = -X
+                waypoints = [
+                    (x0, y0 + 1.5),       # WP1: Avanza de frente hacia el Obs 1
+                    (x0 + 1, y0 + 1.5),   # WP2: Evasión derecha (+X) manteniendo el avance (+1.5 en Y)
+                    (x0 + 1, y0 + 3.2),   # WP3: Avanza pasando el Obs 1
+                    (x0, y0 + 3.2),       # WP4: Vuelve al centro
+                    (x0, y0 + 4.9),       # WP5: Avanza de frente hacia el Obs 2
+                    (x0 - 1, y0 + 4.9),   # WP6: Evasión izquierda (-X) manteniendo el avance (+3.9 en Y)
+                    (x0 - 1, y0 + 6.2),   # WP7: Avanza pasando el Obs 2
+                    (x0, y0 + 6.2),       # WP8: Vuelve al centro
+                    (x0, y0 + 6.61)       # WP9: Posición final
+                ]
+                current_wp_index = 0
+                stable = True
+            else:
+                if current_wp_index < len(waypoints):
+                    xd, yd = waypoints[current_wp_index]
+                    dist = math.sqrt((x_global - xd)**2 + (y_global - yd)**2)
+                    
+                    if dist < 0.15:
+                        current_wp_index += 1
+                        
+                    if current_wp_index < len(waypoints):
+                        xd, yd = waypoints[current_wp_index]
+                        vx = -Kp * (x_global - xd)
+                        vy = -Kp * (y_global - yd)
+                        
+                        v_mag = math.sqrt(vx**2 + vy**2)
+                        # Límite más estricto de velocidad para evitar giros agresivos
+                        if v_mag > 0.4:
+                            vx = (vx / v_mag) * 0.4
+                            vy = (vy / v_mag) * 0.4
+                            
+                        # Filtro de suavizado (low-pass) para una aceleracion progresiva
+                        smoothed_vx = 0.9 * smoothed_vx + 0.1 * vx
+                        smoothed_vy = 0.9 * smoothed_vy + 0.1 * vy
+                            
+                        forward_desired = math.cos(th)*smoothed_vx + math.sin(th)*smoothed_vy
+                        sideways_desired = -math.sin(th)*smoothed_vx + math.cos(th)*smoothed_vy
+                        
+                        dang = th - th0
+                        while dang > math.pi: dang -= 2.0 * math.pi
+                        while dang < -math.pi: dang += 2.0 * math.pi
+                        yaw_desired = -Kh * dang
+                    else:
+                        forward_desired = 0.0
+                        sideways_desired = 0.0
+                        yaw_desired = 0.0
+                else:
+                    forward_desired = 0.0
+                    sideways_desired = 0.0
+                    yaw_desired = 0.0
+                height_desired = 0.6
         else:
             height_desired += height_diff_desired * dt
 
