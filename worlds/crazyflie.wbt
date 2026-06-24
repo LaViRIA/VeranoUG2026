@@ -1,9 +1,13 @@
 #VRML_SIM R2025a utf8
 
-EXTERNPROTO "https://raw.githubusercontent.com/cyberbotics/webots/R2025a/projects/robots/bitcraze/crazyflie/protos/Crazyflie.proto"
+EXTERNPROTO "../protos/Crazyflie.proto"
 EXTERNPROTO "https://raw.githubusercontent.com/cyberbotics/webots/R2025a/projects/objects/backgrounds/protos/TexturedBackground.proto"
 EXTERNPROTO "https://raw.githubusercontent.com/cyberbotics/webots/R2025a/projects/objects/backgrounds/protos/TexturedBackgroundLight.proto"
-EXTERNPROTO "https://raw.githubusercontent.com/cyberbotics/webots/R2025a/projects/objects/floors/protos/Floor.proto"
+EXTERNPROTO "https://raw.githubusercontent.com/cyberbotics/webots/R2025a/projects/objects/floors/protos/RectangleArena.proto"
+EXTERNPROTO "https://raw.githubusercontent.com/cyberbotics/webots/R2025a/projects/appearances/protos/Parquetry.proto"
+EXTERNPROTO "https://raw.githubusercontent.com/cyberbotics/webots/R2025a/projects/objects/factory/manhole/protos/SquareManhole.proto"
+EXTERNPROTO "https://raw.githubusercontent.com/cyberbotics/webots/R2025a/projects/appearances/protos/RedBricks.proto"
+EXTERNPROTO "https://raw.githubusercontent.com/cyberbotics/webots/R2025a/projects/appearances/protos/CementTiles.proto"
 
 WorldInfo {
   info [
@@ -13,18 +17,68 @@ WorldInfo {
   title "Crazyflie"
 }
 Viewpoint {
-  orientation -0.19788885900316225 0.22945643356943812 0.9529898974155081 1.6853425414808443
-  position 0.0335711151209486 -3.8184573440123715 1.8791732540235973
+  orientation -0.33287066370171964 0.1582391830229495 0.9296007111674378 2.447040807776536
+  position 7.280493494920194 -6.494296427718709 8.738425338589341
   follow "Crazyflie"
 }
 TexturedBackground {
 }
 TexturedBackgroundLight {
 }
-Floor {
-}
 Crazyflie {
-  translation 0 0.1 0.1
-  rotation 0 0 1 1.4461745634244147
-  controller "crazyfliepy"
+  hidden linearVelocity_0 9.61329986379619e-19 -1.8599810608070154e-17 -7.815970093361102e-16
+  hidden angularVelocity_0 1.1895246692412393e-15 -1.5860328923216517e-15 3.9074357099252076e-17
+  translation 1.5533175683458554e-17 9.457590193979616e-17 0.06499019000000009
+  rotation 6.264406582690364e-16 1.0579470571315533e-16 1 1.5770703061004254
+  controller "Controlador_principal"
+  extensionSlot [
+    Accelerometer {
+    }
+  ]
+}
+RectangleArena {
+  floorSize 6 6
+  floorAppearance Parquetry {
+    type "light strip"
+  }
+  wallHeight 1.4
+  wallAppearance CementTiles {
+    textureTransform TextureTransform {
+      scale 2 2
+    }
+  }
+}
+Solid {
+  translation 1 1 0.5
+  children [
+    Shape {
+      appearance PBRAppearance {
+        baseColor 0.6 0.8 1
+        roughness 1
+      }
+      geometry Box {
+        size 0.4 0.4 1
+      }
+    }
+  ]
+}
+SquareManhole {
+  size 0.6 0.6 0.1
+}
+Solid {
+  translation 1 1 1.2
+  children [
+    Shape {
+      appearance RedBricks {
+        textureTransform TextureTransform {
+          scale 2 1.3
+        }
+      }
+      geometry Cylinder {
+        height 0.4
+        radius 0.12
+      }
+    }
+  ]
+  name "solid(1)"
 }

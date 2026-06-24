@@ -23,6 +23,7 @@
 # Author:      Kimberly McGuire (Bitcraze AB)
 
 import math
+# pyrefly: ignore [missing-import]
 from controller import Robot, Camera, DistanceSensor, GPS, Gyro, InertialUnit, Keyboard, Motor
 import scipy.interpolate as spi
 
