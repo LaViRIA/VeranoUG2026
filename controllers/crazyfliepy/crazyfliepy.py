@@ -1,6 +1,9 @@
 import math
 from controller import Robot, Camera, DistanceSensor, GPS, Gyro, InertialUnit, Keyboard, Motor
 import scipy.interpolate as spi
+import cv2
+import numpy as np
+from ultralytics import YOLO
 
 # Añadir el controlador externo - pid_controller.py
 from pid_controller import (
@@ -121,6 +124,10 @@ def main():
     smoothed_vy = 0.0 #Velocidad en Y del dron (promedio de las ultimas velocidades)
 
     tini = robot.getTime()
+
+    # Cargar modelo YOLO
+    model = YOLO("yolov8n.pt")
+    cv2.namedWindow("Drone Camera", cv2.WINDOW_AUTOSIZE)
 
     while robot.step(timestep) != -1:
         dt = robot.getTime() - past_time
@@ -302,9 +309,72 @@ def main():
         else:
             height_desired += height_diff_desired * dt
 
-        # Ejemplo de cómo obtener datos de los sensores:
-        # range_front_value = range_front.getValue()
-        # image = camera.getImage()
+        # Sistema de reconocimientos de objetos
+        img_data = camera.getImage()
+        if img_data:
+            # Webots devuelve imagen en bytes formato BGRA
+            img_width = camera.getWidth()
+            img_height = camera.getHeight()
+            img_np = np.frombuffer(img_data, np.uint8).reshape((img_height, img_width, 4))
+            
+            # Convertir a BGR para OpenCV
+            img_bgr = cv2.cvtColor(img_np, cv2.COLOR_BGRA2BGR)
+            
+            # Inferencia YOLO (silenciada para no llenar la consola)
+            results = model(img_bgr, verbose=False)
+            
+            # Obtener el FOV de la cámara
+            fov = camera.getFov()
+            
+            for r in results:
+                for box in r.boxes:
+                    # Coordenadas Bounding box
+                    x1, y1, x2, y2 = box.xyxy[0].cpu().numpy()
+                    conf = round(float(box.conf[0]), 2)
+                    
+                    # Ignorar detecciones con baja confianza (menor al 40%)
+                    if conf < 0.4:
+                        continue
+                        
+                    cls = int(box.cls[0])
+                    class_name = model.names[cls]
+                    
+                    # Filtrar por clases (ignorar sillas, mesas, monitores, etc)
+                    # "person" es el humano. Las otras son clases típicas con las que YOLO confunde a un barril
+                    clases_aceptadas = ["person", "bottle", "cup", "vase", "fire hydrant", "sports ball"]
+                    if class_name not in clases_aceptadas:
+                        continue
+                    
+                    # Dibujar bounding box
+                    cv2.rectangle(img_bgr, (int(x1), int(y1)), (int(x2), int(y2)), (0, 255, 0), 2)
+                    
+                    # Estimacion de tamaño y distancia
+                    bbox_height = float(y2 - y1)
+                    if bbox_height <= 0:
+                        bbox_height = 1.0 # Prevenir division por cero
+                    
+                    # Alturas estimadas reales (metros)
+                    if class_name == "person":
+                        real_height = 1.70 # Humano
+                    else:
+                        real_height = 1.0 # Barril (YOLO suele detectarlo como bottle, cup, etc)
+                        
+                    # Calculo de distancia usando Pinhole model
+                    dist_estimada = (real_height * img_height) / (bbox_height * 2 * math.tan(fov/2))
+                    
+                    # Textos a mostrar
+                    label = f"{class_name} {conf}"
+                    dist_text = f"Dist: {dist_estimada:.2f}m"
+                    size_text = f"H_px: {int(bbox_height)}"
+                    
+                    cv2.putText(img_bgr, label, (int(x1), int(y1)-30), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 2)
+                    cv2.putText(img_bgr, dist_text, (int(x1), int(y1)-15), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 255), 2)
+                    cv2.putText(img_bgr, size_text, (int(x1), int(y1)), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 0), 2)
+                    
+            # Mostrar la ventana
+            cv2.imshow("Drone camara", img_bgr)
+            cv2.waitKey(1)
+        ############################################################
 
         desired_state.yaw_rate = yaw_desired
 
