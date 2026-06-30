@@ -23,9 +23,10 @@
 # Author:      Kimberly McGuire (Bitcraze AB)
 
 import math
-# pyrefly: ignore [missing-import]
+# pyre-ignore: missing-import
 from controller import Robot, Camera, DistanceSensor, GPS, Gyro, InertialUnit, Keyboard, Motor
 import scipy.interpolate as spi
+import numpy as np
 
 # Add external controller
 from pid_controller import (
@@ -36,6 +37,7 @@ from pid_controller import (
     init_pid_attitude_fixed_height_controller,
     pid_velocity_fixed_height_controller,
 )
+from trayectoria import control_trayectoria
 
 FLYING_ALTITUDE = 1.0
 
@@ -116,6 +118,7 @@ def main():
     init_pid_attitude_fixed_height_controller()
 
     height_desired = FLYING_ALTITUDE
+    
 
     # Initialize struct for motor power
     motor_power = MotorPower()
@@ -129,10 +132,21 @@ def main():
     print("- Use W and S to go up and down")
 
     Kp = 5
-    xvec = [0, 1, -1]
-    yvec = [0, 1, 1]
-    thvec = [math.pi/4, math.pi/2, math.pi]
-    tvec = [0, 5, 10, 15]
+    
+    # Generar trayectoria
+    trayectoria = control_trayectoria()
+    numero_puntos = trayectoria.puntos_necesarios()
+    puntos = trayectoria.puntos_trayectoria_circular(numero_puntos)
+    
+    xvec = [p[0] for p in puntos]
+    yvec = [p[1] for p in puntos]
+    thvec = [math.atan2(1.0-p[1],1.0-p[0]) for p in puntos]
+    thvec = np.unwrap(thvec).tolist()
+    
+    # tvec debe tener un elemento más que xvec porque luego se le añade la posición global inicial
+    tiempo_por_punto = 5.0
+    tvec = [i * tiempo_por_punto for i in range(len(xvec) + 1)]
+    altura_vuelo = trayectoria.altura_vuelo
 
     stable = False
 
@@ -227,6 +241,7 @@ def main():
                 xvec = [x_global] + xvec
                 yvec = [y_global] + yvec
                 thvec = [th] + thvec
+                thvec = np.unwrap(thvec).tolist()
                 xc = spi.splrep(tvec, xvec)
                 yc = spi.splrep(tvec, yvec)
                 thc = spi.splrep(tvec, thvec)
@@ -240,9 +255,9 @@ def main():
                 vy = -Kp*(y_global-yd)
                 forward_desired = math.cos(th)*vx+math.sin(th)*vy
                 sideways_desired = -math.sin(th)*vx+math.cos(th)*vy
-                height_desired = 1.0
+                height_desired = altura_vuelo
                 thd = spi.splev(tcurr, thc)
-                dang = math.fmod(th-thd, 2.0*math.pi)
+                dang = (th - thd + math.pi) % (2.0 * math.pi) - math.pi
                 yaw_desired = -Kh*dang
                 if tcurr > tvec[-1]:
                     forward_desired = 0
@@ -277,3 +292,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+

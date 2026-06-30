@@ -45,7 +45,7 @@ class PID:
         self.error_y=0.0
         self.integrador_altitud=0.0
 
-        self.altura=1.0
+        self.altura=1.3
        
 
     def control_altitud(self,altitud_des,altitud_act,dt):
