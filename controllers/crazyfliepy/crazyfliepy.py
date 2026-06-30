@@ -1,9 +1,14 @@
 import math
-from controller import Robot, Camera, DistanceSensor, GPS, Gyro, InertialUnit, Keyboard, Motor
+from controller import Robot, Camera, DistanceSensor, GPS, Gyro, InertialUnit, Keyboard, Motor # pyright: ignore[reportMissingImports]
 import scipy.interpolate as spi
 import cv2
 import numpy as np
-from ultralytics import YOLO
+
+import sys
+# Agregar la raiz del proyecto al path (dos carpetas arriba)
+sys.path.append('../../')
+
+from detection_system.detector import ObjectDetector
 
 # Añadir el controlador externo - pid_controller.py
 from pid_controller import (
@@ -100,13 +105,7 @@ def main():
     # Inicializar la estructura para la potencia del motor
     motor_power = MotorPower()
 
-    print()
-    print("====== Controls =======")
-    print(" The Crazyflie can be controlled from your keyboard!")
-    print(" All controllable movement is in body coordinates")
-    print("- Use the up, back, right and left button to move in the horizontal plane")
-    print("- Use Q and E to rotate around yaw")
-    print("- Use W and S to go up and down")
+    print("Inicio de la simulacion")
 
     Kp = 5
     xvec = [0, 1, -1]
@@ -125,9 +124,8 @@ def main():
 
     tini = robot.getTime()
 
-    # Cargar modelo YOLO
-    model = YOLO("yolov8n.pt")
-    cv2.namedWindow("Drone Camera", cv2.WINDOW_AUTOSIZE)
+    # Cargar modelo YOLO guardandolo en la raiz del proyecto
+    detector = ObjectDetector(model_path="../../models/yolov8s.pt")
 
     while robot.step(timestep) != -1:
         dt = robot.getTime() - past_time
@@ -164,58 +162,11 @@ def main():
         yaw_desired = 0.0
         height_diff_desired = 0.0
 
-        '''# Control del drone mediante el teclado
-        key = keyboard.getKey()
-        while key > 0:
-            if key == Keyboard.UP:
-                forward_desired = +0.5
-            elif key == Keyboard.DOWN:
-                forward_desired = -0.5
-            elif key == Keyboard.RIGHT:
-                sideways_desired = -0.5
-            elif key == Keyboard.LEFT:
-                sideways_desired = +0.5
-            elif key == ord("Q"):
-                yaw_desired = 1.0
-            elif key == ord("E"):
-                yaw_desired = -1.0
-            elif key == ord("W"):
-                height_diff_desired = 0.1
-            elif key == ord("S"):
-                height_diff_desired = -0.1
-
-            key = keyboard.getKey()
-        tcurr = robot.getTime()-tini
-        '''
-        
-        '''## Movimientos a velocidad constante
-        theta = 2*math.pi*tcurr/10.0
-        v = 0.5
-        forward_desired = v*math.cos(theta)
-        sideways_desired = v*math.sin(theta)
-        if tcurr > 5:
-            height_diff_desired = 0.15*math.sin(2*math.pi*3*tcurr)
-        yaw_desired = 0.0
-        '''
-        
-        '''## Controlador tipo robot DDR
-         Kv = 0.5
-         Kh = 1.0
-         xd = 0
-         yd = 0
-         errp = math.sqrt((x_global-xd)**2 + (y_global-yd)**2)
-         ct = math.cos(rpy[2])
-         st = math.sin(rpy[2])
-         errh = math.atan2(ct*(yd-y_global)-st*(xd-x_global), st*(yd-y_global)+ct*(xd-x_global))
-         forward_desired = Kv*errp
-         yaw_desired = Kh*errh
-        '''
-
         # Controlador para la orientación o yaw - Segmento que se encarga de la navegacion automatica
         Kh = 5.0
         th = rpy[2]
 
-        '''
+        '''Sistema de navegacion con interpolacion cubica
         if robot.getTime() > 5:
             if stable == False:
                 #inicializa interp
@@ -312,68 +263,12 @@ def main():
         # Sistema de reconocimientos de objetos
         img_data = camera.getImage()
         if img_data:
-            # Webots devuelve imagen en bytes formato BGRA
-            img_width = camera.getWidth()
-            img_height = camera.getHeight()
-            img_np = np.frombuffer(img_data, np.uint8).reshape((img_height, img_width, 4))
-            
-            # Convertir a BGR para OpenCV
-            img_bgr = cv2.cvtColor(img_np, cv2.COLOR_BGRA2BGR)
-            
-            # Inferencia YOLO (silenciada para no llenar la consola)
-            results = model(img_bgr, verbose=False)
-            
-            # Obtener el FOV de la cámara
-            fov = camera.getFov()
-            
-            for r in results:
-                for box in r.boxes:
-                    # Coordenadas Bounding box
-                    x1, y1, x2, y2 = box.xyxy[0].cpu().numpy()
-                    conf = round(float(box.conf[0]), 2)
-                    
-                    # Ignorar detecciones con baja confianza (menor al 40%)
-                    if conf < 0.4:
-                        continue
-                        
-                    cls = int(box.cls[0])
-                    class_name = model.names[cls]
-                    
-                    # Filtrar por clases (ignorar sillas, mesas, monitores, etc)
-                    # "person" es el humano. Las otras son clases típicas con las que YOLO confunde a un barril
-                    clases_aceptadas = ["person", "bottle", "cup", "vase", "fire hydrant", "sports ball"]
-                    if class_name not in clases_aceptadas:
-                        continue
-                    
-                    # Dibujar bounding box
-                    cv2.rectangle(img_bgr, (int(x1), int(y1)), (int(x2), int(y2)), (0, 255, 0), 2)
-                    
-                    # Estimacion de tamaño y distancia
-                    bbox_height = float(y2 - y1)
-                    if bbox_height <= 0:
-                        bbox_height = 1.0 # Prevenir division por cero
-                    
-                    # Alturas estimadas reales (metros)
-                    if class_name == "person":
-                        real_height = 1.70 # Humano
-                    else:
-                        real_height = 1.0 # Barril (YOLO suele detectarlo como bottle, cup, etc)
-                        
-                    # Calculo de distancia usando Pinhole model
-                    dist_estimada = (real_height * img_height) / (bbox_height * 2 * math.tan(fov/2))
-                    
-                    # Textos a mostrar
-                    label = f"{class_name} {conf}"
-                    dist_text = f"Dist: {dist_estimada:.2f}m"
-                    size_text = f"H_px: {int(bbox_height)}"
-                    
-                    cv2.putText(img_bgr, label, (int(x1), int(y1)-30), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 2)
-                    cv2.putText(img_bgr, dist_text, (int(x1), int(y1)-15), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 255), 2)
-                    cv2.putText(img_bgr, size_text, (int(x1), int(y1)), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 0), 2)
-                    
-            # Mostrar la ventana
-            cv2.imshow("Drone camara", img_bgr)
-            cv2.waitKey(1)
+            detector.process_image(
+                img_data=img_data,
+                img_width=camera.getWidth(),
+                img_height=camera.getHeight(),
+                fov=camera.getFov()
+            )
         ############################################################
 
         desired_state.yaw_rate = yaw_desired
