@@ -1,17 +1,27 @@
 import cv2
 import numpy as np
 import math
+# pyrefly: ignore [missing-import]
 from ultralytics import YOLO
 import os 
 import glob
 
 class YoloDetector:
     def __init__(self, model_path="yolov8n.pt", window_name="Drone Camera"):
+        dir_actual = os.path.dirname(os.path.abspath(__file__))
+        if not os.path.isabs(model_path):
+            model_path_abs = os.path.join(dir_actual, model_path)
+            if os.path.exists(model_path_abs):
+                model_path = model_path_abs
+            else:
+                model_path_base = os.path.abspath(os.path.join(dir_actual, "..", "..", model_path))
+                if os.path.exists(model_path_base):
+                    model_path = model_path_base
         self.model = YOLO(model_path)
         self.window_name = window_name
         self.clases_aceptadas = ["person", "bottle", "cup", "vase", "fire hydrant", "sports ball"]
         #cv2.namedWindow(self.window_name, cv2.WINDOW_AUTOSIZE)
-        self.ruta_fotos="/home/jpirmz/Documents/PR_Bebop/Pruebas_verano2026/Verano_2026/controllers/Controlador_principal/fotos_capturadas"
+        self.ruta_fotos = os.path.join(dir_actual, "fotos_capturadas")
         
 
     def imagenes_capturadas(self):
@@ -22,7 +32,13 @@ class YoloDetector:
             print("No se encontraron imagenes")
             return 0.0
         for n in nombres:
+            if not os.path.exists(n) or os.path.getsize(n) == 0:
+                print(f"Advertencia: El archivo {n} está vacío o no existe.")
+                continue
             img_np=cv2.imread(n)
+            if img_np is None:
+                print(f"Advertencia: No se pudo leer la imagen {n}")
+                continue
             img_width=img_np.shape[1]
             img_height=img_np.shape[0]
             puntaje=self.process_image(img_np, img_width, img_height, 0.87)
@@ -85,28 +101,61 @@ class YoloDetector:
                 p_medio2=punto_medio_img-35
                 puntaje_act=0
 
-                if y1>borde_vertical and y2<img_height-borde_vertical:
-                    foto_buena=True
-                    altura=img_height
-                    altura_obj=y2-y1
-                    porc=(altura_obj/altura)*100
-                    
-                    # Evaluacion de altura de objeto
-                    error_altura = abs(porc - 70.0)
-                    # Tolerancia más amplia
-                    puntaje_altura = max(0.0, 5.0 - (error_altura / 10.0))
-                    puntaje_act += puntaje_altura
-                     
-                    # Evaluacion de centrado horizontal 
-                    error_centrado = abs(punto_medio_obj - punto_medio_img)
-                    puntaje_centrado = max(0.0, 5.0 - (error_centrado / (img_width / 15.0)))
-                    puntaje_act += puntaje_centrado
-                    
-                    if puntaje_act>puntaje:
-                        puntaje=puntaje_act
+
+                altura=img_height
+                altura_obj=y2-y1
+                porc=(altura_obj/altura)*100
+                margen=8
+                foto_mala=False
+
+                if y1 <=margen or y2>=altura-margen:
+                    foto_mala=True
                 
-                else:
-                    foto_buena=False
+                # Evaluacion de altura de objeto
+                error_altura = abs(porc - 60.0)
+                # Tolerancia más amplia
+                puntaje_altura = max(0.0, 5.0 - (error_altura / 18.0))
+                puntaje_act += puntaje_altura
+                    
+                # Evaluacion de centrado horizontal 
+                error_centrado = abs(punto_medio_obj - punto_medio_img)
+                puntaje_centrado = max(0.0, 5.0 - (error_centrado / (img_width / 6.0)))
+
+                # Evaluacion de centrado vertical
+                punto_medio_img_v = img_height / 2
+                punto_medio_obj_v = (y2 + y1) / 2
+                error_centrado_v = abs(punto_medio_obj_v - punto_medio_img_v)
+                puntaje_centrado_v = max(0.0, 5.0 - (error_centrado_v / (img_height / 6.0)))
+                
+                # Sumar los 3 puntajes
+                puntaje_act = puntaje_altura + puntaje_centrado + puntaje_centrado_v
+                if foto_mala:
+                    puntaje_act=puntaje_act*0.1
+                if puntaje_act>puntaje:
+                    puntaje=puntaje_act
+
+                # if y1>borde_vertical and y2<img_height-borde_vertical:
+                #     foto_buena=True
+                #     altura=img_height
+                #     altura_obj=y2-y1
+                #     porc=(altura_obj/altura)*100
+                    
+                #     # Evaluacion de altura de objeto
+                #     error_altura = abs(porc - 70.0)
+                #     # Tolerancia más amplia
+                #     puntaje_altura = max(0.0, 5.0 - (error_altura / 10.0))
+                #     puntaje_act += puntaje_altura
+                     
+                #     # Evaluacion de centrado horizontal 
+                #     error_centrado = abs(punto_medio_obj - punto_medio_img)
+                #     puntaje_centrado = max(0.0, 5.0 - (error_centrado / (img_width / 15.0)))
+                #     puntaje_act += puntaje_centrado
+                    
+                #     if puntaje_act>puntaje:
+                #         puntaje=puntaje_act
+                
+                # else:
+                #     foto_buena=False
 
         return puntaje
 
