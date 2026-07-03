@@ -148,7 +148,7 @@ def fun_costo(p):
     
   
 
-    # El costo ahora se basa en la distancia teórica (suave) en lugar del tiempo simulado (ruidoso)
+    # El costo ahora se basa en la distancia teórica (suave) en lugar del tiempo simulado 
     costo = -ptj+penalizacion_distancia+h
     
     costos.append(costo)
@@ -206,19 +206,16 @@ if __name__ == "__main__":
         x=puntos[i][0]
         y=puntos[i][1]
         z=puntos[i][2]
-        
-        # Agregamos ruido aleatorio seguro para que la trayectoria inicie "extraña"
-        # y veamos cómo el optimizador la arregla hacia un círculo
+
         if i%2==0:
             dx = x - 1.0
             dy = y - 1.0
             r = mt.sqrt(dx**2 + dy**2)
             theta = mt.atan2(dy, dx)
             
-            # Variamos el radio y el ángulo aleatoriamente
+            
             r += np.random.uniform(-1.0, 1.0)
-            # Aseguramos que se mantenga dentro del margen seguro (2.3 a 5.4)
-            # para no causar penalizaciones de validación en la iteración 1
+        
             r = np.clip(r, 2.3, 5.4)
             theta += np.random.uniform(-0.5, 0.5)
             
@@ -233,7 +230,6 @@ if __name__ == "__main__":
     print(f" optimizando con COBYLA... ")
     # COBYLA es mucho más agresivo e inteligente para problemas de muchas variables.
     # 'rhobeg' es el tamaño del paso inicial (0.5 metros), lo que garantiza que explore
-    # cambios más grandes desde el principio.
     resultado=minimize(fun_costo, wp_in, method="COBYLA", options={'rhobeg': 0.5, 'maxiter':250, 'disp':True})
     print("\n")
     print(f"RESULTADO:{np.reshape(resultado.x,(-1,3))}")
