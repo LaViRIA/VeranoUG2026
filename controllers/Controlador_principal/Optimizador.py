@@ -1,3 +1,4 @@
+
 from scipy.optimize import _minimize
 import numpy as np 
 import json 
@@ -39,32 +40,85 @@ tray_obj = control_trayectoria()
 
 contador=0
 costos=[]
+
+
 def fun_costo(p):
     global contador 
     contador+=1
     print(f"ITERACION {contador}")
-    # 1. Reconstruir a 3D a partir del vector p
+    peso=3.2
+
+    # 1. Reconstruir a partir del vector p
     wp3d = np.reshape(p, (-1, 3)).tolist()
-    v=0.0
+
     wp = []
+    h=0.0 #Penalizacion limites de volumen
+
     for w in wp3d:
         x = w[0]
         y = w[1]
         z = w[2]
-        
-        # Calcular el yaw para que siempre apunte al objeto en (1, 1)
-        dx = 1.0 - x
-        dy = 1.0 - y
-        yaw = mt.atan2(dy, dx)
-        
-        if z<0.4:
-            v+=10000*(0.4-z)**2
-            z=0.4
-        elif z>2.5:
-            v+=10000*(z-2.5)**2
-            z=2.5
+        # dx = 1.0 - x
+        # dy = 1.0 - y
+        # yaw = mt.atan2(dy, dx)
 
-        wp.append([x, y, z, yaw])
+        dist_r=mt.sqrt((x-1.0)**2+(y-1.0)**2)
+
+        if z <0.5:
+            h+=abs(0.5-z)*500.0
+        elif z>2.5:
+            h+=abs(2.5-z)*500.0
+        
+        if dist_r<2.2:
+            h+=abs(2.2-dist_r)*500.0
+        elif dist_r>5.5:
+            h+=abs(5.5-dist_r)*500.0
+    
+     
+        wp.append([x, y, z])#,yaw])
+
+    # Calcular distancia teórica de la ruta (sin ruido de simulación)
+    distancia_teorica = 0.0
+    segmentos=[]
+    for i in range(len(wp)-1):
+        distancia_teorica += mt.sqrt((wp[i+1][0]-wp[i][0])**2 + (wp[i+1][1]-wp[i][1])**2)
+        segmentos.append(mt.sqrt((wp[i+1][0]-wp[i][0])**2 + (wp[i+1][1]-wp[i][1])**2))
+    # Sumar el tramo final al inicio para cerrar el circuito
+    distancia_teorica += mt.sqrt((wp[0][0]-wp[-1][0])**2 + (wp[0][1]-wp[-1][1])**2)
+    segmentos.append(mt.sqrt((wp[0][0]-wp[-1][0])**2 + (wp[0][1]-wp[-1][1])**2))
+    medida=distancia_teorica/len(segmentos)
+    penalizacion_distancia=0.0
+    for seg in segmentos:
+        d1=seg-medida
+        d2=(d1**2)*10 # Penalización elástica (cuadrática)
+        penalizacion_distancia+=d2
+        
+    # Penalizar si los segmentos entre waypoints cruzan la zona prohibida (radio 2.2)
+    # Incluimos el punto de despegue en (-2, -2) para asegurar la llegada al primer punto
+    wp_con_inicio = [[-2.0, -2.0, 0.85]] + wp + [wp[0]]
+    for i in range(len(wp_con_inicio) - 1):
+        p1 = wp_con_inicio[i]
+        p2 = wp_con_inicio[i+1]
+        x1, y1 = p1[0], p1[1]
+        x2, y2 = p2[0], p2[1]
+        cx, cy = 1.0, 1.0
+        dx = x2 - x1
+        dy = y2 - y1
+        l2 = dx*dx + dy*dy
+        if l2 > 0:
+            t = max(0, min(1, ((cx - x1)*dx + (cy - y1)*dy) / l2))
+            px = x1 + t * dx
+            py = y1 + t * dy
+            dist_seg = mt.sqrt((px - cx)**2 + (py - cy)**2)
+            if dist_seg < 2.2:
+                h += abs(2.2 - dist_seg) * 500.0
+
+    if h>0:
+      ptj=peso*(-100.0)
+      costo=-ptj+penalizacion_distancia+h
+      costos.append(costo)
+      print(f"Posicion invalida: {contador} - Costo: {costo:.2f}")
+      return costo 
     
     # 2. Escribir 'mision.json'
     diccionario={
@@ -89,40 +143,14 @@ def fun_costo(p):
 
     # 5. Retornar el costo
     puntaje=detector.imagenes_capturadas()
-    peso=3.2
+    
     ptj=peso*puntaje
     
-    # Calcular distancia teórica de la ruta (sin ruido de simulación)
-    distancia_teorica = 0.0
-    segmentos=[]
-    for i in range(len(wp)-1):
-        distancia_teorica += mt.sqrt((wp[i+1][0]-wp[i][0])**2 + (wp[i+1][1]-wp[i][1])**2)
-        segmentos.append(mt.sqrt((wp[i+1][0]-wp[i][0])**2 + (wp[i+1][1]-wp[i][1])**2))
-    # Sumar el tramo final al inicio para cerrar el circuito
-    distancia_teorica += mt.sqrt((wp[0][0]-wp[-1][0])**2 + (wp[0][1]-wp[-1][1])**2)
-    segmentos.append(mt.sqrt((wp[0][0]-wp[-1][0])**2 + (wp[0][1]-wp[-1][1])**2))
-    medida=distancia_teorica/len(segmentos)
-    penalizacion_distancia=0.0
-    for seg in segmentos:
-        d1=seg-medida
-        d2=(d1**2)*10 # Penalización elástica (cuadrática)
-        penalizacion_distancia+=d2
+  
 
     # El costo ahora se basa en la distancia teórica (suave) en lugar del tiempo simulado (ruidoso)
-    costo = distancia_teorica - ptj+penalizacion_distancia
-    co=0.0
-    for w in wp:
-        w1=w[0]
-        w2=w[1]
-        w3=w[2]
-        d=mt.sqrt((w1-1.0)**2+(w2-1.0)**2)
-        if d<1.2:
-            co += 1000.0 * (1.2 - d)**2
-        elif d>5.5:
-            co += 1000.0 * (d - 5.5)**2
-        if w3>2.5 or w3<0.4:
-            co+=1000.0*(w3-0.3)
-    costo=costo+co+v
+    costo = -ptj+penalizacion_distancia+h
+    
     costos.append(costo)
 
     #tiempo de vuelo, puntaje 
@@ -131,17 +159,22 @@ def fun_costo(p):
 
     x_vals = [w[0] for w in wp]
     y_vals = [w[1] for w in wp]
+    z_vals=[w[2] for w in wp]
+    # yaw_vals=[w[3] for w in wp]
+
     x_vals.append(x_vals[0])
     y_vals.append(y_vals[0])
-
+    z_vals.append(z_vals[0])
+    # yaw_vals.append(yaw_vals[0])
+    
     plt.figure(figsize=(6,6))
     plt.plot(x_vals, y_vals, marker='x', color='blue', label='Ruta')
-    for x, y in zip(x_vals[:-1], y_vals[:-1]):
-        plt.text(x, y, f"({x:.1f}, {y:.1f})", fontsize=8, ha='left', va='bottom', color='black')
+    for x, y, z in zip(x_vals[:-1], y_vals[:-1], z_vals[:-1]):#,yaw_vals[:-1]):
+        plt.text(x, y, f"({x:.1f}, {y:.1f},{z:.1f})", fontsize=8, ha='left', va='bottom', color='black')
 
     plt.plot(1.0, 1.0, marker='*', color='gold', markersize=15, label='Objeto') 
     ax = plt.gca()
-    ax.add_patch(plt.Circle((1.0, 1.0), 1.2, color='red', fill=False, linestyle='--'))
+    ax.add_patch(plt.Circle((1.0, 1.0), 2.2, color='red', fill=False, linestyle='--'))
     ax.add_patch(plt.Circle((1.0, 1.0), 5.5, color='green', fill=False, linestyle='--'))
 
     plt.xlim(-5, 7)
@@ -174,32 +207,34 @@ if __name__ == "__main__":
         y=puntos[i][1]
         z=puntos[i][2]
         
-        nums_rand=np.random.uniform(0.0,n,size=2)
-       
+        # Agregamos ruido aleatorio seguro para que la trayectoria inicie "extraña"
+        # y veamos cómo el optimizador la arregla hacia un círculo
         if i%2==0:
-            x+=nums_rand[0]
-            y+=nums_rand[1]
-        
-        # Solo agregamos x, y, z. El yaw se calcula en fun_costo
+            dx = x - 1.0
+            dy = y - 1.0
+            r = mt.sqrt(dx**2 + dy**2)
+            theta = mt.atan2(dy, dx)
+            
+            # Variamos el radio y el ángulo aleatoriamente
+            r += np.random.uniform(-1.0, 1.0)
+            # Aseguramos que se mantenga dentro del margen seguro (2.3 a 5.4)
+            # para no causar penalizaciones de validación en la iteración 1
+            r = np.clip(r, 2.3, 5.4)
+            theta += np.random.uniform(-0.5, 0.5)
+            
+            x = 1.0 + r * mt.cos(theta)
+            y = 1.0 + r * mt.sin(theta)
+            
         puntos_opt.append([x, y, z])
 
     puntos3d=np.array(puntos_opt)
     wp_in=np.ravel(puntos3d)
     
-
-    N = len(wp_in)
-    simplex_inicial = np.zeros((N + 1, N))
-    simplex_inicial[0] = wp_in
-    radio_busqueda = 0.5 
-    for i in range(N):
-        simplex_inicial[i+1] = np.copy(wp_in)
-        if i %4 ==3:
-            simplex_inicial[i+1][i] += 0.0
-        else:
-            simplex_inicial[i+1][i] += 1.5
-
-    print(f" optimizando... ")
-    resultado=minimize(fun_costo, wp_in, method="Nelder-Mead", options={'maxiter':250, 'disp':True, 'initial_simplex': simplex_inicial, 'adaptive': True, 'xatol': 0.5, 'fatol': 1.0})
+    print(f" optimizando con COBYLA... ")
+    # COBYLA es mucho más agresivo e inteligente para problemas de muchas variables.
+    # 'rhobeg' es el tamaño del paso inicial (0.5 metros), lo que garantiza que explore
+    # cambios más grandes desde el principio.
+    resultado=minimize(fun_costo, wp_in, method="COBYLA", options={'rhobeg': 0.5, 'maxiter':250, 'disp':True})
     print("\n")
     print(f"RESULTADO:{np.reshape(resultado.x,(-1,3))}")
     
@@ -220,10 +255,10 @@ if __name__ == "__main__":
         x = w[0]
         y = w[1]
         z = w[2]
-        dx = 1.0 - x
-        dy = 1.0 - y
-        yaw = mt.atan2(dy, dx)
-        wp_final.append([x, y, z, yaw])
+        # dx = 1.0 - x
+        # dy = 1.0 - y
+        # yaw = mt.atan2(dy, dx)
+        wp_final.append([x, y, z])
 
     x_opt = [w[0] for w in wp_final]
     y_opt = [w[1] for w in wp_final]
@@ -237,7 +272,7 @@ if __name__ == "__main__":
         plt.text(x, y, f"({x:.1f}, {y:.1f})", fontsize=6, ha='left', va='bottom', color='black')
     plt.plot(1.0, 1.0, marker='*', color='gold', markersize=15, label='Objeto') 
     ax = plt.gca()
-    ax.add_patch(plt.Circle((1.0, 1.0), 1.2, color='red', fill=False, linestyle='--'))
+    ax.add_patch(plt.Circle((1.0, 1.0), 1.5, color='red', fill=False, linestyle='--'))
     ax.add_patch(plt.Circle((1.0, 1.0), 5.5, color='green', fill=False, linestyle='--'))
 
     plt.xlim(-5, 7)
@@ -259,133 +294,3 @@ if __name__ == "__main__":
     comando=[webots_path,  ruta_mundo]
     print("SIMULACION FINAL")
     subprocess.run(comando)
-
-# def fun_costo(p):
-#     global contador 
-#     contador+=1
-#     print(f"ITERACION {contador}")
-    
-#     # NUEVO: Reconstruir a partir de 2D (x, y). La Z la dejamos fija en 0.85 (tu altura_vuelo)
-#     wp2d = np.reshape(p, (-1, 2)).tolist()
-#     wp = []
-#     z_fija = 0.85 
-#     for w in wp2d:
-#         x = w[0]
-#         y = w[1]
-#         dx = 1.0 - x
-#         dy = 1.0 - y
-#         yaw = mt.atan2(dy, dx)
-#         wp.append([x, y, z_fija, yaw])
-    
-#     # 2. Escribir 'mision.json'
-#     diccionario={
-#         "waypoints":wp
-#     }
-#     with open(ruta_mision, "w") as f:
-#         json.dump(diccionario, f)
-    
-#     # 3. Llamar a Webots (subprocess)
-#     comando=[webots_path, "--mode=fast","--no-rendering","--minimize", "--batch", ruta_mundo]
-#     subprocess.run(comando)
-    
-#     # 4. Leer 'reporte_vuelo.json'
-#     with open(ruta_reporte, "r") as f:
-#         diccionario2=json.load(f)
-#         tiempo_total=diccionario2["tiempo_total"]
-
-#     # 5. Retornar el costo
-#     puntaje=detector.imagenes_capturadas()
-#     peso=2.0
-#     ptj=peso*puntaje
-    
-#     # Calcular distancia teórica
-#     distancia_teorica = 0.0
-#     for i in range(len(wp)-1):
-#         distancia_teorica += mt.sqrt((wp[i+1][0]-wp[i][0])**2 + (wp[i+1][1]-wp[i][1])**2)
-#     distancia_teorica += mt.sqrt((wp[0][0]-wp[-1][0])**2 + (wp[0][1]-wp[-1][1])**2)
-    
-#     costo = distancia_teorica - ptj
-#     co=0.0
-#     for w in wp:
-#         w1=w[0]
-#         w2=w[1]
-#         d=mt.sqrt((w1-1.0)**2+(w2-1.0)**2)
-#         if d<1.2:
-#             co += 1000.0 * (1.2 - d)**2
-#         elif d>5.5:
-#             co += 1000.0 * (d - 5.5)**2
-#     costo=costo+co
-#     costos.append(costo)
-
-#     print(f"Distancia teorica: {round(distancia_teorica,2)} | puntaje YOLO: {round(puntaje,2)} | COSTO FINAL: {round(costo,2)}")
-
-#     x_vals = [w[0] for w in wp]
-#     y_vals = [w[1] for w in wp]
-#     x_vals.append(x_vals[0])
-#     y_vals.append(y_vals[0])
-
-#     plt.figure(figsize=(6,6))
-#     plt.plot(x_vals, y_vals, marker='x', color='blue', label='Ruta')
-#     plt.plot(1.0, 1.0, marker='*', color='gold', markersize=15, label='Objeto') 
-#     ax = plt.gca()
-#     ax.add_patch(plt.Circle((1.0, 1.0), 1.2, color='red', fill=False, linestyle='--'))
-#     ax.add_patch(plt.Circle((1.0, 1.0), 5.5, color='green', fill=False, linestyle='--'))
-
-#     plt.xlim(-5, 7)
-#     plt.ylim(-5, 7)
-#     plt.grid(True)
-#     plt.title(f"Iteración {contador} - Costo: {round(costo, 2)}")
-#     plt.savefig(os.path.join(ruta_historia, f"iteracion_{contador}.png"))
-#     plt.close()
-
-#     return costo
-
-# if __name__ == "__main__":
-#     if os.path.exists(ruta_historia) is False:
-#         os.makedirs(ruta_historia)
-#     else:
-#         shutil.rmtree(ruta_historia)
-#         os.makedirs(ruta_historia)
-        
-#     num_puntos=tray_obj.puntos_necesarios()
-#     puntos=tray_obj.puntos_trayectoria_circular(num_puntos)
-    
-#     # NUEVO: Guardar solo X y Y (16 dimensiones en total)
-#     puntos2d=[]
-#     for i in range(len(puntos)):
-#         x=puntos[i][0]
-#         y=puntos[i][1]
-        
-#         if i%2==0:
-#             x+=1.5
-
-#         puntos2d.append([x, y])
-
-#     puntos2d=np.array(puntos2d)
-#     wp_in=np.ravel(puntos2d)
-    
-#     N = len(wp_in)
-#     simplex_inicial = np.zeros((N + 1, N))
-#     simplex_inicial[0] = wp_in
-#     radio_busqueda = 0.5 
-#     for i in range(N):
-#         simplex_inicial[i+1] = np.copy(wp_in)
-#         simplex_inicial[i+1][i] += radio_busqueda
-    
-#     print(f" Optimizando con {int(len(wp_in)/2)} puntos de control (Solo en 2D = {len(wp_in)} variables) ")
-    
-#     # maxiter 150 es un buen límite razonable
-#     resultado=minimize(fun_costo, wp_in, method="Nelder-Mead", options={'maxiter':100, 'disp':True, 'initial_simplex': simplex_inicial, 'adaptive': True, 'xatol': 0.1, 'fatol': 0.1})
-    
-#     print("\nRESULTADO OPTIMIZACIÓN:")
-#     print(np.reshape(resultado.x,(-1,2)))
-    
-#     plt.plot(range(1, len(costos) + 1), costos, marker='o')
-#     plt.xlabel("Iteraciones")
-#     plt.ylabel("Costo (Error)")
-#     plt.title("Convergencia del Algoritmo de Optimización")
-#     plt.grid(True)
-#     plt.savefig(ruta_convergencia)
-#     print("¡Terminado! Revisa la gráfica de convergencia.")
-
-    
