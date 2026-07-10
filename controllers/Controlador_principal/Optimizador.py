@@ -82,6 +82,7 @@ def fun_costo(waypointsrt):
     wp_xy = np.reshape(waypointsrt, (-1, 2)).tolist()
 
     wp = []
+    wp_guardar = []
     h=0.0 #Penalizacion limites de volumen
     penalizacion_suavidad = 0.0
 
@@ -93,22 +94,24 @@ def fun_costo(waypointsrt):
         # Calcular radio real actual para restricciones
         r = mt.sqrt((x - 1.0)**2 + (y - 1.0)**2)
 
-        # Restricciones en R (aunque los limites del optimizador ya evitan esto, lo dejamos por seguridad)
+        # Restricciones en r
         if r<radio_min:
             h+=abs(radio_min-r)*500.0
         elif r>radio_max:
             h+=abs(radio_max-r)*500.0
 
-        # Penalización por cambios bruscos (Suavidad)
+        # Penalización por cambios bruscos 
         if i > 0:
             x_prev = wp_xy[i-1][0]
             y_prev = wp_xy[i-1][1]
             dist_prev = mt.sqrt((x - x_prev)**2 + (y - y_prev)**2)
-            # Penalizar si la distancia entre waypoints es muy grande (salto brusco)
+            # Penalizar si la distancia entre waypoints es muy grande 
             if dist_prev > 2.5:
-                penalizacion_suavidad += (dist_prev - 2.5) * 100.0
+                penalizacion_dmax += (dist_prev - 2.5) * 100.0
             
+        yaw = mt.atan2(1.0 - y, 1.0 - x)
         wp.append([x, y, z])
+        wp_guardar.extend([x, y, z, yaw])
 
     # Calcular distancia teórica de la ruta (sin ruido de simulación)
     distancia_teorica = 0.0
@@ -129,7 +132,6 @@ def fun_costo(waypointsrt):
                 penalizacion_distancia+=(minim-di)*500.0
             
         
-    # Penalizar si los segmentos entre waypoints cruzan la zona prohibida (radio 1.2)
     wp_con_inicio = [[-2.0, -2.0, 0.85]] + wp + [wp[0]]
     for i in range(len(wp_con_inicio) - 1):
         p1 = wp_con_inicio[i]
@@ -156,7 +158,7 @@ def fun_costo(waypointsrt):
       
       with open(ruta_historial, mode='a', newline='') as file:
           writer = csv.writer(file)
-          writer.writerow([contador, costo] + np.ravel(wp_xy).tolist())
+          writer.writerow([contador, costo, 0.0, h, penalizacion_distancia, penalizacion_suavidad, distancia_teorica, 0.0] + wp_guardar)
       return costo 
     
     # 2. Escribir 'mision.json'
@@ -191,7 +193,7 @@ def fun_costo(waypointsrt):
     
     ptj = peso_fotos * puntaje
     
-    # El costo ahora incluye la distancia y el tiempo para que COBYLA tenga un gradiente que seguir
+   
     costo = -ptj + h + penalizacion_distancia + penalizacion_suavidad + (peso_dist * distancia_teorica) + (peso_tiempo * tiempo_total)
     
     costos.append(costo)
@@ -201,7 +203,7 @@ def fun_costo(waypointsrt):
   
     with open(ruta_historial, mode='a', newline='') as file:
         writer = csv.writer(file)
-        writer.writerow([contador, costo] + np.ravel(wp_xy).tolist())
+        writer.writerow([contador, costo, puntaje, h, penalizacion_distancia, penalizacion_suavidad, distancia_teorica, tiempo_total] + wp_guardar)
 
     Graficar_trayectoria(puntos,contador,costo,ruta_historia,radio_min,radio_max)
 
@@ -222,7 +224,7 @@ if __name__ == "__main__":
     # "circulo_ruido"
     # "cuadrado_ruido"
 
-    puntos3d=tray_obj.trayectoria_inicial(num_puntos,"cuadrada")
+    puntos3d=tray_obj.trayectoria_inicial(num_puntos,"circular")
     puntos2d=[[p[0],p[1]] for p in puntos3d]
 
     wp_in=np.ravel(puntos2d)
@@ -232,9 +234,9 @@ if __name__ == "__main__":
     with open(ruta_historial, mode='w', newline='') as file:
         writer = csv.writer(file)
         # Crear los encabezados
-        encabezados = ["Evaluacion", "Costo"]
+        encabezados = ["Evaluacion", "Costo", "Puntaje_YOLO", "Penalizacion_Obs", "Penalizacion_Dist", "Penalizacion_Suav", "Distancia_Teorica", "Tiempo_Vuelo"]
         for i in range(len(wp_in)//2):
-            encabezados.extend([f"x{i}", f"y{i}"])
+            encabezados.extend([f"x{i}", f"y{i}", f"z{i}", f"yaw{i}"])
         writer.writerow(encabezados)
 
     # Restricciones para COBYLA: (x-1)^2 + (y-1)^2 >= 1.2^2  y  (x-1)^2 + (y-1)^2 <= 5.5^2
@@ -251,20 +253,27 @@ if __name__ == "__main__":
         restricciones.append({'type': 'ineq', 'fun': crear_restriccion_max(j)})
 
     # Ejecutar COBYLA
-    resultado = minimize(fun_costo, x0=wp_in, method='COBYLA', constraints=restricciones, options={'maxiter': 250, 'disp': True})
+    resultado = minimize(fun_costo, x0=wp_in, method='COBYLA', constraints=restricciones, options={'maxiter': 30, 'disp': True})
     
-    print("\n")
-    print(f"RESULTADO FINAL (X,Y,Z):\n{np.round(np.reshape(resultado.x, (-1, 3)), 2)}")
-
-
+    print(f"\n--- COSTO FINAL: {resultado.fun:.2f} ---")
+    
     ty_opt=np.reshape(resultado.x, (-1, 2)).tolist()
     wp_final = []
 
+    print("RESULTADO FINAL (X, Y, Z, YAW):")
+    wp_guardar_final = []
     for i, xy in enumerate(ty_opt):
         z = altura
         x = xy[0]
         y = xy[1]
+        yaw = mt.atan2(1.0 - y, 1.0 - x)
+        print(f"P{i}: X={x:.2f}, Y={y:.2f}, Z={z:.2f}, Yaw={yaw:.2f}")
         wp_final.append([x, y, z])
+        wp_guardar_final.extend([x, y, z, yaw])
+        
+    with open(ruta_historial, mode='a', newline='') as file:
+        writer = csv.writer(file)
+        writer.writerow(["OPTIMO", resultado.fun, "", "", "", "", "", ""] + wp_guardar_final)
 
     graficas_finales(costos,resultado,ruta_convergencia,ruta_base,altura,rmin,rmax)
 
