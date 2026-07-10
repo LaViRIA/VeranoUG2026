@@ -75,7 +75,7 @@ def fun_costo(waypointsrt):
     contador+=1
     print(f"Evaluacion no: {contador}")
     peso=3.2
-    radio_min=1.2
+    radio_min=1.8
     radio_max=4.5
 
   
@@ -84,7 +84,7 @@ def fun_costo(waypointsrt):
     wp = []
     wp_guardar = []
     h=0.0 #Penalizacion limites de volumen
-    penalizacion_suavidad = 0.0
+    penalizacion_dmax = 0.0
 
     for i, xy in enumerate(wp_xy):
         x = xy[0]
@@ -147,18 +147,18 @@ def fun_costo(waypointsrt):
             px = x1 + t * dx
             py = y1 + t * dy
             dist_seg = mt.sqrt((px - cx)**2 + (py - cy)**2)
-            if dist_seg < 1.15:
-                h += abs(1.15 - dist_seg) * 500.0
+            if dist_seg < 1.75:
+                h += abs(1.75 - dist_seg) * 500.0
 
     if h>0:
       ptj=peso*(-100.0)
-      costo=-ptj+h+penalizacion_distancia+penalizacion_suavidad
+      costo=-ptj+h+penalizacion_distancia+penalizacion_dmax
       costos.append(costo)
       print(f"Posicion invalida: {contador} - Costo: {costo:.2f}")
       
       with open(ruta_historial, mode='a', newline='') as file:
           writer = csv.writer(file)
-          writer.writerow([contador, costo, 0.0, h, penalizacion_distancia, penalizacion_suavidad, distancia_teorica, 0.0] + wp_guardar)
+          writer.writerow([contador, costo, 0.0, h, penalizacion_distancia, penalizacion_dmax, distancia_teorica, 0.0] + wp_guardar)
       return costo 
     
     # 2. Escribir 'mision.json'
@@ -194,7 +194,7 @@ def fun_costo(waypointsrt):
     ptj = peso_fotos * puntaje
     
    
-    costo = -ptj + h + penalizacion_distancia + penalizacion_suavidad + (peso_dist * distancia_teorica) + (peso_tiempo * tiempo_total)
+    costo = -ptj + h + penalizacion_distancia + penalizacion_dmax + (peso_dist * distancia_teorica) + (peso_tiempo * tiempo_total)
     
     costos.append(costo)
 
@@ -203,7 +203,7 @@ def fun_costo(waypointsrt):
   
     with open(ruta_historial, mode='a', newline='') as file:
         writer = csv.writer(file)
-        writer.writerow([contador, costo, puntaje, h, penalizacion_distancia, penalizacion_suavidad, distancia_teorica, tiempo_total] + wp_guardar)
+        writer.writerow([contador, costo, puntaje, h, penalizacion_distancia, penalizacion_dmax, distancia_teorica, tiempo_total] + wp_guardar)
 
     Graficar_trayectoria(puntos,contador,costo,ruta_historia,radio_min,radio_max)
 
@@ -213,7 +213,7 @@ def fun_costo(waypointsrt):
 if __name__ == "__main__":
   
     altura=0.45
-    rmin=1.2
+    rmin=1.8
     rmax=4.5
         
     num_puntos=tray_obj.puntos_necesarios()
@@ -234,17 +234,17 @@ if __name__ == "__main__":
     with open(ruta_historial, mode='w', newline='') as file:
         writer = csv.writer(file)
         # Crear los encabezados
-        encabezados = ["Evaluacion", "Costo", "Puntaje_YOLO", "Penalizacion_Obs", "Penalizacion_Dist", "Penalizacion_Suav", "Distancia_Teorica", "Tiempo_Vuelo"]
+        encabezados = ["Evaluacion", "Costo", "Puntaje_YOLO", "Penalizacion_Obs", "Penalizacion_Dist", "Penalizacion_dmax", "Distancia_Teorica", "Tiempo_Vuelo"]
         for i in range(len(wp_in)//2):
             encabezados.extend([f"x{i}", f"y{i}", f"z{i}", f"yaw{i}"])
         writer.writerow(encabezados)
 
-    # Restricciones para COBYLA: (x-1)^2 + (y-1)^2 >= 1.2^2  y  (x-1)^2 + (y-1)^2 <= 5.5^2
+    # Restricciones para COBYLA: (x-1)^2 + (y-1)^2 >= 1.8^2  y  (x-1)^2 + (y-1)^2 <= 5.5^2
     restricciones = []
     
     #Funciones para restriccion cobyla
     def crear_restriccion_min(idx):
-        return lambda p: (p[idx] - 1.0)**2 + (p[idx+1] - 1.0)**2 - 1.2**2
+        return lambda p: (p[idx] - 1.0)**2 + (p[idx+1] - 1.0)**2 - 1.8**2
     def crear_restriccion_max(idx):
         return lambda p: 5.5**2 - ((p[idx] - 1.0)**2 + (p[idx+1] - 1.0)**2)
         
@@ -253,7 +253,7 @@ if __name__ == "__main__":
         restricciones.append({'type': 'ineq', 'fun': crear_restriccion_max(j)})
 
     # Ejecutar COBYLA
-    resultado = minimize(fun_costo, x0=wp_in, method='COBYLA', constraints=restricciones, options={'maxiter': 30, 'disp': True})
+    resultado = minimize(fun_costo, x0=wp_in, method='COBYLA', constraints=restricciones, options={'maxiter': 120, 'disp': True})
     
     print(f"\n--- COSTO FINAL: {resultado.fun:.2f} ---")
     
